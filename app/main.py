@@ -11,9 +11,15 @@ from app.core.exceptions import (
     ExtractionException,
     ValidationException
 )
+from app.core.config import settings
+from app.core.logger import logger
 
 
-app = FastAPI()
+app = FastAPI(title=settings.APP_NAME)
+
+logger.info(f"Starting {settings.APP_NAME}")
+logger.info(f"Database: {settings.DATABASE_URL}")
+logger.info(f"OCR Engine: {settings.OCR_ENGINE}")
 
 app.add_exception_handler(
     OCRException,

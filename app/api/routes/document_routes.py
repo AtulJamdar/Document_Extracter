@@ -1,25 +1,20 @@
 from fastapi import APIRouter, UploadFile, File
 
-from app.services.ocr.tesseract_ocr_service import TesseractOCRService
 from app.utils.file_handler import save_uploaded_file
 from app.utils.validators import validate_file_extension
-from app.documents.classifiers.keyword_classifier import KeywordClassifier
 from app.documents.extractors.extractor_factory import ExtractorFactory
 from app.database.session import SessionLocal
-from app.repositories.document_repository import (
-    DocumentRepository
-)
-from app.repositories.extracted_field_repository import (
-    ExtractedFieldRepository
-)
+from app.core.container import Container
 
 
 router = APIRouter()
 
-ocr_service = TesseractOCRService()
-classifier = KeywordClassifier()
-document_repository = DocumentRepository()
-field_repository = ExtractedFieldRepository()
+container = Container()
+
+ocr_service = container.ocr_service()
+classifier = container.classifier()
+document_repository = container.document_repository()
+field_repository = container.extracted_field_repository()
 
 
 @router.post("/extract-text")
@@ -74,7 +69,9 @@ async def extract_text(file: UploadFile = File(...)):
         return {
             "document_id": saved_document.id,
             "document_type": classification_result.document_type,
-            "extracted_data": extracted_data
+            "confidence": classification_result.confidence,
+            "raw_text": extracted_text,
+            "extracted_data": extracted_data.model_dump() if extracted_data else {}
         }
 
     finally:

@@ -88,6 +88,12 @@ node_modules/
 package-lock.json
 yarn.lock
 
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/cache/
+.streamlit/*.json
+.streamlit/*.db
+
 # Misc
 *.bak
 *.tmp

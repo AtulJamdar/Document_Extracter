@@ -1,90 +1,143 @@
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance
+
+from app.services.preprocessing.base_preprocessor import (
+    BasePreprocessor
+)
 from app.core.logger import logger
 
 
-class ImagePreprocessor:
-    """Image preprocessing for OCR"""
+class ImagePreprocessor(BasePreprocessor):
+    """Advanced image preprocessing for OCR"""
 
-    @staticmethod
-    def preprocess(image_path: str) -> np.ndarray:
+    def preprocess(self, file_path: str) -> np.ndarray:
         """
-        Comprehensive preprocessing pipeline
-
+        Full preprocessing pipeline for document images
+        
         Args:
-            image_path: Path to image file
-
+            file_path: Path to input image
+            
         Returns:
             Preprocessed image as numpy array
         """
-        logger.info(f"Starting preprocessing for {image_path}")
+        try:
+            logger.info(f"Starting preprocessing for {file_path}")
+            
+            # Read image
+            image = cv2.imread(file_path)
+            if image is None:
+                raise ValueError(f"Could not read image: {file_path}")
+            
+            # Convert to grayscale
+            gray = self._to_grayscale(image)
+            logger.info("Converted to grayscale")
+            
+            # Resize for better OCR readability
+            resized = self._resize_image(gray)
+            logger.info("Image resized (2x upscaling)")
+            
+            # Denoise
+            denoised = self._denoise(resized)
+            logger.info("Denoising completed")
+            
+            # Rotation correction
+            deskewed = self._deskew(denoised)
+            logger.info("Deskewing completed")
+            
+            # Adaptive thresholding for uneven lighting
+            thresholded = self._threshold(deskewed)
+            logger.info("Thresholding completed")
+            
+            # Morphological operations for cleanup
+            cleaned = self._morphological_cleanup(thresholded)
+            logger.info("Morphological cleanup completed")
+            
+            logger.info("Preprocessing pipeline completed successfully")
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Preprocessing failed: {str(e)}")
+            raise
 
-        # Read image
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"Could not read image: {image_path}")
+    def _to_grayscale(self, image: np.ndarray) -> np.ndarray:
+        """Convert BGR to grayscale"""
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Step 1: Auto-rotate if needed
-        image = ImagePreprocessor.auto_rotate(image)
-        logger.info("Auto-rotation completed")
-
-        # Step 2: Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        logger.info("Converted to grayscale")
-
-        # Step 3: Denoise
-        denoised = cv2.fastNlMeansDenoising(gray, h=10)
-        logger.info("Denoising completed")
-
-        # Step 4: Enhance contrast
-        enhanced = ImagePreprocessor.enhance_contrast(denoised)
-        logger.info("Contrast enhancement completed")
-
-        # Step 5: Binarization (convert to black and white)
-        binary = cv2.threshold(enhanced, 150, 255, cv2.THRESH_BINARY)[1]
-        logger.info("Binarization completed")
-
-        # Step 6: Dilation and Erosion to remove noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        processed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        logger.info("Morphological operations completed")
-
-        logger.info("Preprocessing pipeline completed successfully")
-        return processed
-
-    @staticmethod
-    def auto_rotate(image: np.ndarray) -> np.ndarray:
+    def _resize_image(self, image: np.ndarray) -> np.ndarray:
         """
-        Auto-detect and rotate image if needed
-
-        Args:
-            image: Input image
-
-        Returns:
-            Rotated image
+        Resize image for better OCR
+        2x upscaling improves tesseract accuracy significantly
         """
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blur, 100, 200)
+        return cv2.resize(
+            image,
+            None,
+            fx=2,
+            fy=2,
+            interpolation=cv2.INTER_CUBIC
+        )
 
-        # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    def _denoise(self, image: np.ndarray) -> np.ndarray:
+        """Remove noise from image"""
+        return cv2.fastNlMeansDenoising(
+            image,
+            h=10,
+            templateWindowSize=7,
+            searchWindowSize=21
+        )
 
-        if len(contours) > 0:
+    def _deskew(self, image: np.ndarray) -> np.ndarray:
+        """
+        Detect and correct image rotation
+        Critical for tilted document uploads
+        """
+        try:
+            # Binary threshold for contour detection
+            _, binary = cv2.threshold(
+                image,
+                150,
+                255,
+                cv2.THRESH_BINARY
+            )
+            
+            # Find contours
+            contours, _ = cv2.findContours(
+                binary,
+                cv2.RETR_LIST,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+            
+            if len(contours) == 0:
+                return image
+            
             # Find largest contour
-            largest_contour = max(contours, key=cv2.contourArea)
+            largest_contour = max(
+                contours,
+                key=cv2.contourArea
+            )
+            
+            # Calculate rotation angle
             rect = cv2.minAreaRect(largest_contour)
             angle = rect[2]
-
-            # Rotate if angle is significant
+            
+            # Normalize angle
             if angle < -45:
-                angle = 90 + angle
-
-            if abs(angle) > 5:  # Only rotate if angle > 5 degrees
+                angle = -(90 + angle)
+            else:
+                angle = -angle
+            
+            # Only rotate if angle is significant
+            if abs(angle) > 2:
                 h, w = image.shape[:2]
                 center = (w // 2, h // 2)
-                rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                
+                # Get rotation matrix
+                rotation_matrix = cv2.getRotationMatrix2D(
+                    center,
+                    angle,
+                    1.0
+                )
+                
+                # Apply rotation
                 rotated = cv2.warpAffine(
                     image,
                     rotation_matrix,
@@ -92,34 +145,60 @@ class ImagePreprocessor:
                     flags=cv2.INTER_CUBIC,
                     borderMode=cv2.BORDER_REPLICATE
                 )
+                
                 logger.info(f"Image rotated by {angle} degrees")
                 return rotated
+            
+            return image
+            
+        except Exception as e:
+            logger.warning(f"Deskewing failed: {str(e)}, continuing without rotation correction")
+            return image
 
-        return image
-
-    @staticmethod
-    def enhance_contrast(image: np.ndarray) -> np.ndarray:
+    def _threshold(self, image: np.ndarray) -> np.ndarray:
         """
-        Enhance image contrast and brightness
-
-        Args:
-            image: Input grayscale image
-
-        Returns:
-            Enhanced image
+        Apply adaptive thresholding for text
+        Better than simple thresholding for uneven lighting
         """
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(image)
+        # Adaptive thresholding works better for documents with uneven lighting
+        adaptive = cv2.adaptiveThreshold(
+            image,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            11,
+            2
+        )
+        
+        return adaptive
 
-        # Apply morphological operations to clean up
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
-
-        return enhanced
-
-    @staticmethod
-    def save_preprocessed_image(image: np.ndarray, output_path: str) -> None:
-        """Save preprocessed image for debugging"""
-        cv2.imwrite(output_path, image)
-        logger.info(f"Preprocessed image saved to {output_path}")
+    def _morphological_cleanup(
+        self,
+        image: np.ndarray
+    ) -> np.ndarray:
+        """
+        Remove noise using morphological operations
+        Cleans up artifacts while preserving text
+        """
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (2, 2)
+        )
+        
+        # Close operation removes small holes in text
+        closed = cv2.morphologyEx(
+            image,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=1
+        )
+        
+        # Open operation removes small noise
+        opened = cv2.morphologyEx(
+            closed,
+            cv2.MORPH_OPEN,
+            kernel,
+            iterations=1
+        )
+        
+        return opened

@@ -1,10 +1,8 @@
 from sqlalchemy import create_engine
 
+from app.core.config import settings
 
-# IMPORTANT: Replace with your actual PostgreSQL credentials
-# Format: postgresql://username:password@localhost/database_name
-DATABASE_URL = (
-    "postgresql://postgres:%40atul123@localhost/doc_db"
+
+engine = create_engine(
+    settings.DATABASE_URL
 )
-
-engine = create_engine(DATABASE_URL)
